@@ -31,7 +31,16 @@ class Conv_Q(nn.Module):
 
 		# imitation (BC)
 		self.i1 = nn.Linear(3136, 512)
-		self.i2 = nn.Linear(512, num_actions)
+		# head 1
+		self.i2_1 = nn.Linear(512, num_actions)
+		# head 2
+		self.i2_2 = nn.Linear(512, num_actions)
+		# head 3
+		self.i2_3 = nn.Linear(512, num_actions)
+		# head 4
+		self.i2_4 = nn.Linear(512, num_actions)
+		# head 5
+		self.i2_5 = nn.Linear(512, num_actions)
 
 	def compute_Q(self, state):
 		c = F.relu(self.c1(state))
@@ -40,7 +49,9 @@ class Conv_Q(nn.Module):
 
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
-		i = self.i2(i)	# logits
+		# logits
+		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
+		i = (i_1 + i_2 + i_3 + i_4 + i_5) / 5.0
 
 		# compute ensemble Q-values (batch, action dim)
 		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
@@ -59,23 +70,38 @@ class Conv_Q(nn.Module):
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		batch = q.shape[0]
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
-		i = self.i2(i)	# logits
 
-		# i_noise = torch.Tensor(batch, self.num_actions).uniform_(0, 1).to(self.device)
-		i_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
-		log_prob = F.log_softmax(i, dim=1)	# for training
-		imt = F.log_softmax(i + i_noise, dim=1)		# for judging condition
+		# logits
+		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
 
-		# compute ensemble Q-values (batch, action dim)
-		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
 		# random ensemble mixture
 		alpha = torch.Tensor(batch, 5).uniform_(0, 1).to(self.device)
 		d = alpha.sum(dim=1)
-		alpha = torch.stack([x/d[idx] for idx, x in enumerate(alpha)]).to(self.device)
-		# alpha (batch, 5), alpha 1 + alpha1 2 + ... + alpha 5 = 1.0
+		alpha = torch.stack([x/d[idx] for idx, x in enumerate(alpha)]).to(self.device)	# alpha (batch, 5), alpha 1 + alpha1 2 + ... + alpha 5 = 1.0
+
+		# i_noise = torch.Tensor(batch, self.num_actions).uniform_(0, 1).to(self.device)
+		i_1_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
+		i_2_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
+		i_3_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
+		i_4_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
+		i_5_noise = torch.Tensor(batch, self.num_actions).normal_(mean=0, std=0.1).to(self.device)
+		_i_1 = i_1 + i_1_noise
+		_i_2 = i_2 + i_2_noise
+		_i_3 = i_3 + i_3_noise
+		_i_4 = i_4 + i_4_noise
+		_i_5 = i_5 + i_5_noise
+		_i = alpha[:, 0].view(-1, 1)*_i_1 + alpha[:, 1].view(-1, 1)*_i_2 + alpha[:, 2].view(-1, 1)*_i_3 + alpha[:, 3].view(-1, 1)*_i_4 + alpha[:, 4].view(-1, 1)*_i_5
+		imt = F.log_softmax(_i, dim=1)		# for judging condition
+
+		# compute ensemble Q-values (batch, action dim)
+		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
+
+		# random ensemble logits
+		i = alpha[:, 0].view(-1, 1)*i_1 + alpha[:, 1].view(-1, 1)*i_2 + alpha[:, 2].view(-1, 1)*i_3 + alpha[:, 3].view(-1, 1)*i_4 + alpha[:, 4].view(-1, 1)*i_5
+		log_prob = F.log_softmax(i, dim=1)	# for training
 
 		q2 = alpha[:, 0].view(-1, 1)*q2_1 + alpha[:, 1].view(-1, 1)*q2_2 + alpha[:, 2].view(-1, 1)*q2_3 + alpha[:, 3].view(-1, 1)*q2_4 + alpha[:, 4].view(-1, 1)*q2_5
-		return q2, imt, log_prob, i
+		return q2, imt, log_prob, i 		# RM Q-value, RM log_prob (w noise), RM log_prob (w/o noise), RM logits (w/o noise)
 
 
 # Used for Box2D / Toy problems
@@ -199,7 +225,9 @@ class discrete_BCQ(object):
 		current_Q = current_Q.gather(1, action)
 
 		# Compute Q loss
+		# add ensemble var TODO
 		q_loss = F.smooth_l1_loss(current_Q, target_Q)
+		# cross-entropy
 		i_loss = F.nll_loss(log_prob, action.reshape(-1))
 
 		# i is logits
