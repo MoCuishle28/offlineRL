@@ -13,6 +13,8 @@ import discrete_BCQREM_multi_imt_noise
 import discrete_BCQREM_no_batch_alpha
 import discrete_BCQREM_softmax
 import discrete_BCQREM_one_condition_noise
+import BCQREM_reward_var
+import BCQREM_cond_var
 
 import discrete_BCQ
 import DQN
@@ -262,6 +264,44 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"]
 		)
+	elif args.model == 'BCQREMrvar':
+		print('creating BCQ-REM with multi supervised head (without noise), reward - var')
+		policy = BCQREM_reward_var.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
+	elif args.model == 'BCQREMcondvar':
+		print('creating BCQ-REM with multi supervised head (without noise), probability / var')
+		policy = BCQREM_cond_var.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
 		
 
 	# Load replay buffer	
@@ -273,7 +313,7 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 	training_iters = 0
 
 	print('NO.1 evaluations...')
-	evaluations.append(eval_policy(policy, args.env, args.seed))
+	# evaluations.append(eval_policy(policy, args.env, args.seed))	# TODO
 	while training_iters < args.max_timesteps: 
 		
 		for train_policy_times in range(int(parameters["eval_freq"])):
@@ -296,6 +336,10 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMsoftmax_{setting}", evaluations)
 		elif args.model == 'BCQREMcon':
 			np.save(f"./results/BCQREMcon_{setting}", evaluations)
+		elif args.model == 'BCQREMrvar':
+			np.save(f"./results/BCQREMrvar_{setting}", evaluations)
+		elif args.model == 'BCQREMcondvar':
+			np.save(f"./results/BCQREMcondvar_{setting}", evaluations)
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -398,10 +442,13 @@ if __name__ == "__main__":
 	'''
 	choose model: 
 		BCQ, BCQREM, BCQREMoneimt(noise), BCQREMmultiimt, BCQREMnobatch(no batch alpha)
-		BCQREMsoftmax (softmax alpha), BCQREMcon (only condition noise) (one supervised head)
+		BCQREMsoftmax (softmax alpha), BCQREMcon (only condition noise) (one supervised head), 
+		BCQREMrvar (without noise), 
+		BCQREMcondvar (naive adpt-> use std),
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
+	parser.add_argument("--var_threshold", default=0.3, type=float)#  Threshold for action var
 	args = parser.parse_args()
 	
 	print("---------------------------------------")	
