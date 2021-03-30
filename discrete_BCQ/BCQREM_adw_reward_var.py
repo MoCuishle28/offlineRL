@@ -29,6 +29,10 @@ class Conv_Q(nn.Module):
 		# head 5
 		self.q2_5 = nn.Linear(512, num_actions)
 
+		# value function
+		self.v2_1 = nn.Linear(512, 256)
+		self.v2_2 = nn.Linear(256, 1)
+
 		# imitation (BC)
 		self.i1 = nn.Linear(3136, 512)
 		# head 1
@@ -48,7 +52,12 @@ class Conv_Q(nn.Module):
 		c = F.relu(self.c2(c))
 		c = F.relu(self.c3(c))
 
-		q = F.relu(self.q1(c.reshape(-1, 3136)))
+		# Q-function
+		q = F.relu(self.q1(c.reshape(-1, 3136)))		
+		# value function
+		v = F.relu(self.v2_1(q))	# share param with Q-function
+		v = F.relu(self.v2_2(v))
+
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
 		# logits
 		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
@@ -64,7 +73,7 @@ class Conv_Q(nn.Module):
 		# 	F.softmax(i_3, dim=1), F.softmax(i_4, dim=1), F.softmax(i_5, dim=1)) if need_std==True else None
 		# 2. logits std
 		std_matrix = self._compute_action_std(i_1, i_2, i_3, i_4, i_5) if need_std==True else None
-		return q2, F.log_softmax(i, dim=1), i, std_matrix
+		return q2, F.log_softmax(i, dim=1), i, std_matrix, v
 
 
 	def _compute_action_std(self, i_1, i_2, i_3, i_4, i_5):
@@ -88,7 +97,12 @@ class Conv_Q(nn.Module):
 		c = F.relu(self.c2(c))
 		c = F.relu(self.c3(c))
 
+		# Q-function
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
+		# value function
+		v = F.relu(self.v2_1(q))	# share param with Q-function
+		v = F.relu(self.v2_2(v))
+
 		batch = q.shape[0]
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
 
@@ -114,7 +128,7 @@ class Conv_Q(nn.Module):
 		# 	F.softmax(i_3, dim=1), F.softmax(i_4, dim=1), F.softmax(i_5, dim=1))
 		# 2. logits std
 		std_matrix = self._compute_action_std(i_1, i_2, i_3, i_4, i_5) if need_std==True else None
-		return q2, F.log_softmax(i, dim=1), i, std_matrix
+		return q2, F.log_softmax(i, dim=1), i, std_matrix, v
 
 
 # Used for Box2D / Toy problems
@@ -197,8 +211,7 @@ class discrete_BCQ(object):
 		if np.random.uniform(0,1) > self.eval_eps:
 			with torch.no_grad():
 				state = torch.FloatTensor(state).reshape(self.state_shape).to(self.device)
-				# how to use std (without gradient) TODO
-				q, imt, i, std_matrix = self.Q.compute_Q(state, need_std=False)	# use average Q-values during the test
+				q, imt, i, std_matrix, _ = self.Q.compute_Q(state, need_std=False)	# use average Q-values during the test
 				imt = imt.exp()
 				imt = (imt/imt.max(1, keepdim=True)[0] > self.threshold).float()
 				# imt is a matrix (batch, action dim) with 0 or 1 values
@@ -216,13 +229,13 @@ class discrete_BCQ(object):
 
 		# Get current Q estimate
 		# use random ensemble Q-values during optimization
-		current_Q, train_imt, train_i, std_matrix = self.Q(state, need_std=True)
+		current_Q, train_imt, train_i, std_matrix, current_value = self.Q(state, need_std=True)
 		current_Q = current_Q.gather(1, action)
 
 		# Compute the target Q value
 		with torch.no_grad():
 			# use average Q-values during no_grad
-			q, imt, i, _ = self.Q.compute_Q(next_state, need_std=False)
+			q, imt, i, _, _ = self.Q.compute_Q(next_state, need_std=False)
 			imt = imt.exp()
 			imt = (imt/imt.max(1, keepdim=True)[0] > self.threshold).float()
 			
@@ -234,15 +247,22 @@ class discrete_BCQ(object):
 			next_action = (imt * q + (1 - imt) * -1e8).argmax(1, keepdim=True)
 
 			# target network use average Q-values
-			q, imt, i, _ = self.Q_target.compute_Q(next_state, need_std=False)
+			q, imt, i, _, target_state_value = self.Q_target.compute_Q(next_state, need_std=False)
 			target_Q = (reward - action_std) + done * self.discount * q.gather(1, next_action).reshape(-1, 1)
+			
+			# the target of value function
+			target_value = reward + done * self.discount * target_state_value
 
 		# Compute Q loss
 		q_loss = F.smooth_l1_loss(current_Q, target_Q)
-		i_loss = F.nll_loss(train_imt, action.reshape(-1))
+		i_loss = F.nll_loss(train_imt, action.reshape(-1), reduce=False)
+		v_loss = F.smooth_l1_loss(current_value, target_value)
+
+		# advantage weight
+		i_loss = (i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
 
 		# i is logits
-		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean()
+		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss
 
 		# Optimize the Q
 		self.Q_optimizer.zero_grad()

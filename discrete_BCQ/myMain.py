@@ -15,6 +15,7 @@ import discrete_BCQREM_softmax
 import discrete_BCQREM_one_condition_noise
 import BCQREM_reward_var
 import BCQREM_cond_var
+import BCQREM_adw_reward_var
 
 import discrete_BCQ
 import DQN
@@ -302,7 +303,26 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"],
 		)
-		
+	elif args.model == 'BCQREMadwrvar':
+		print('creating BCQ-REM with multi supervised head (without noise), reward - var, adw SL model')
+		policy = BCQREM_adw_reward_var.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
+
 
 	# Load replay buffer	
 	replay_buffer.load(f"./buffers/{buffer_name}")
@@ -340,6 +360,8 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMrvar_{setting}", evaluations)
 		elif args.model == 'BCQREMcondvar':
 			np.save(f"./results/BCQREMcondvar_{setting}", evaluations)
+		elif args.model == 'BCQREMadwrvar':
+			np.save(f"./results/BCQREMadwrvar_{setting}", evaluations)
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -445,6 +467,7 @@ if __name__ == "__main__":
 		BCQREMsoftmax (softmax alpha), BCQREMcon (only condition noise) (one supervised head), 
 		BCQREMrvar (without noise), 
 		BCQREMcondvar (naive adpt-> use std),
+		BCQREMadwrvar (adw SL model, reward - var)
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
