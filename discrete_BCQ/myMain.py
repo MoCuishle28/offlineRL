@@ -17,6 +17,7 @@ import BCQREM_reward_var
 import BCQREM_cond_var
 import BCQREM_adw_reward_var
 import BCQREM_adw_cond_var
+import BCQREM_adw
 
 import discrete_BCQ
 import DQN
@@ -342,6 +343,25 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"],
 		)
+	elif args.model == 'BCQREMadw':
+		print('creating BCQ-REM with multi supervised head (without noise), adw SL model')
+		policy = BCQREM_adw.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
 
 
 	# Load replay buffer	
@@ -353,7 +373,7 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 	training_iters = 0
 
 	print('NO.1 evaluations...')
-	# evaluations.append(eval_policy(policy, args.env, args.seed))	# TODO
+	evaluations.append(eval_policy(policy, args.env, args.seed))	# TODO DEBUG
 	while training_iters < args.max_timesteps: 
 		
 		for train_policy_times in range(int(parameters["eval_freq"])):
@@ -384,6 +404,8 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMadwrvar_{setting}", evaluations)
 		elif args.model == 'BCQREMadwcondvar':
 			np.save(f"./results/BCQREMadwcondvar_{setting}", evaluations)
+		elif args.model == 'BCQREMadw':
+			np.save(f"./results/BCQREMadw_{setting}", evaluations)
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -491,6 +513,7 @@ if __name__ == "__main__":
 		BCQREMcondvar (cond: probability / var),
 		BCQREMadwrvar (adw SL model, reward - std),
 		BCQREMadwcondvar (adw SL model, cond: probability / var)
+		BCQREMadw
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
