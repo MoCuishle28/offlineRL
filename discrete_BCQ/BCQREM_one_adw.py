@@ -36,15 +36,7 @@ class Conv_Q(nn.Module):
 		# imitation (BC)
 		self.i1 = nn.Linear(3136, 512)
 		# head 1
-		self.i2_1 = nn.Linear(512, num_actions)
-		# head 2
-		self.i2_2 = nn.Linear(512, num_actions)
-		# head 3
-		self.i2_3 = nn.Linear(512, num_actions)
-		# head 4
-		self.i2_4 = nn.Linear(512, num_actions)
-		# head 5
-		self.i2_5 = nn.Linear(512, num_actions)
+		self.i2 = nn.Linear(512, num_actions)
 
 
 	def compute_Q(self, state, need_std=False):
@@ -55,13 +47,10 @@ class Conv_Q(nn.Module):
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
-		# v = F.relu(self.v2_2(v))	# original
 		v = self.v2_2(v)
 
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
-		# logits
-		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
-		i = (i_1 + i_2 + i_3 + i_4 + i_5) / 5.0
+		i = self.i2(i)	# logits
 
 		# compute ensemble Q-values (batch, action dim)
 		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
@@ -80,14 +69,12 @@ class Conv_Q(nn.Module):
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
-		# v = F.relu(self.v2_2(v))	# original
 		v = self.v2_2(v)
 
 		batch = q.shape[0]
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
+		i = self.i2(i)				# logits (batch, action dim)
 
-		# compute ensemble logits (batch, action dim)
-		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
 		# compute ensemble Q-values (batch, action dim)
 		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
 		
@@ -97,8 +84,6 @@ class Conv_Q(nn.Module):
 		alpha = torch.stack([x/d[idx] for idx, x in enumerate(alpha)]).to(self.device)
 		# alpha (batch, 5), alpha 1 + alpha1 2 + ... + alpha 5 = 1.0
 
-		# random ensemble logits
-		i = alpha[:, 0].view(-1, 1)*i_1 + alpha[:, 1].view(-1, 1)*i_2 + alpha[:, 2].view(-1, 1)*i_3 + alpha[:, 3].view(-1, 1)*i_4 + alpha[:, 4].view(-1, 1)*i_5
 		# random ensemble q
 		q2 = alpha[:, 0].view(-1, 1)*q2_1 + alpha[:, 1].view(-1, 1)*q2_2 + alpha[:, 2].view(-1, 1)*q2_3 + alpha[:, 3].view(-1, 1)*q2_4 + alpha[:, 4].view(-1, 1)*q2_5
 		return q2, F.log_softmax(i, dim=1), i, v

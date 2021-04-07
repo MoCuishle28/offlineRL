@@ -56,7 +56,8 @@ class Conv_Q(nn.Module):
 		q = F.relu(self.q1(c.reshape(-1, 3136)))		
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
-		v = F.relu(self.v2_2(v))
+		# v = F.relu(self.v2_2(v))	# original
+		v = self.v2_2(v)
 
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
 		# logits
@@ -101,7 +102,8 @@ class Conv_Q(nn.Module):
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
-		v = F.relu(self.v2_2(v))
+		# v = F.relu(self.v2_2(v))	# original
+		v = self.v2_2(v)
 
 		batch = q.shape[0]
 		i = F.relu(self.i1(c.reshape(-1, 3136)))
