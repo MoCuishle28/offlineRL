@@ -213,7 +213,7 @@ class discrete_BCQ(object):
 
 		# Compute Q loss
 		q_loss = F.smooth_l1_loss(current_Q, target_Q)
-		i_loss = F.nll_loss(train_imt, action.reshape(-1))
+		i_loss = F.nll_loss(train_imt, action.reshape(-1), reduction='none')
 		v_loss = F.smooth_l1_loss(current_value, target_value)
 
 		# advantage weight
