@@ -21,6 +21,7 @@ import BCQREM_adw_cond_var
 import BCQREM_adw
 import BCQREM_one_adw
 import BCQ_adw
+import BCQ_multi_imt_adw
 
 import discrete_BCQ
 import DQN
@@ -403,7 +404,25 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"],
 		)
-
+	elif args.model == 'BCQmultiimtadw':
+		print('creating BCQ with multi SL head, and adw')
+		policy = BCQ_multi_imt_adw.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
 
 	# Load replay buffer	
 	replay_buffer.load(f"./buffers/{buffer_name}")
@@ -451,6 +470,8 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMadwone_{setting}", evaluations)
 		elif args.model == 'BCQadw':
 			np.save(f"./results/BCQadw_{setting}", evaluations)
+		elif args.model == 'BCQmultiimtadw':
+			np.save(f"./results/BCQmultiimtadw_{setting}", evaluations)
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -561,6 +582,7 @@ if __name__ == "__main__":
 		BCQREMadw
 		BCQREMadwone
 		BCQadw
+		BCQmultiimtadw
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
