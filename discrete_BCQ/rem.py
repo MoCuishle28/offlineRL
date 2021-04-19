@@ -4,42 +4,93 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# BCQ's code from https://github.com/sfujim/BCQ
 
 # Used for Atari
 class Conv_Q(nn.Module):
-	def __init__(self, frames, num_actions):
+	def __init__(self, frames, num_actions, device):
 		super(Conv_Q, self).__init__()
+		self.device = device
+		self.num_actions = num_actions
 		self.c1 = nn.Conv2d(frames, 32, kernel_size=8, stride=4)
 		self.c2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
 		self.c3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
-		self.l1 = nn.Linear(3136, 512)
-		self.l2 = nn.Linear(512, num_actions)
+
+		# Q-learning
+		self.q1 = nn.Linear(3136, 512)
+		# head 1
+		self.q2_1 = nn.Linear(512, num_actions)
+		# head 2
+		self.q2_2 = nn.Linear(512, num_actions)
+		# head 3
+		self.q2_3 = nn.Linear(512, num_actions)
+		# head 4
+		self.q2_4 = nn.Linear(512, num_actions)
+		# head 5
+		self.q2_5 = nn.Linear(512, num_actions)
 
 
-	def forward(self, state):
-		q = F.relu(self.c1(state))
-		q = F.relu(self.c2(q))
-		q = F.relu(self.c3(q))
-		q = F.relu(self.l1(q.reshape(-1, 3136)))
-		return self.l2(q)
+	def compute_Q(self, state, need_std=False):
+		c = F.relu(self.c1(state))
+		c = F.relu(self.c2(c))
+		c = F.relu(self.c3(c))
+
+		q = F.relu(self.q1(c.reshape(-1, 3136)))
+
+		# compute ensemble Q-values (batch, action dim)
+		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
+		q2 = (q2_1 + q2_2 + q2_3 + q2_4 + q2_5) / 5.0
+		return q2
+
+
+	def forward(self, state, need_std=False):
+		'''
+		return: Q-values
+		'''
+		c = F.relu(self.c1(state))
+		c = F.relu(self.c2(c))
+		c = F.relu(self.c3(c))
+
+		q = F.relu(self.q1(c.reshape(-1, 3136)))
+		
+		batch = q.shape[0]
+		# compute ensemble Q-values (batch, action dim)
+		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
+		
+		# random ensemble mixture
+		alpha = torch.Tensor(batch, 5).uniform_(0, 1).to(self.device)
+		d = alpha.sum(dim=1)
+		alpha = torch.stack([x/d[idx] for idx, x in enumerate(alpha)]).to(self.device)
+
+		# random ensemble q
+		q2 = alpha[:, 0].view(-1, 1)*q2_1 + alpha[:, 1].view(-1, 1)*q2_2 + alpha[:, 2].view(-1, 1)*q2_3 + alpha[:, 3].view(-1, 1)*q2_4 + alpha[:, 4].view(-1, 1)*q2_5
+		return q2
 
 
 # Used for Box2D / Toy problems
 class FC_Q(nn.Module):
 	def __init__(self, state_dim, num_actions):
 		super(FC_Q, self).__init__()
-		self.l1 = nn.Linear(state_dim, 256)
-		self.l2 = nn.Linear(256, 256)
-		self.l3 = nn.Linear(256, num_actions)
+		self.q1 = nn.Linear(state_dim, 256)
+		self.q2 = nn.Linear(256, 256)
+		self.q3 = nn.Linear(256, num_actions)
+
+		self.i1 = nn.Linear(state_dim, 256)
+		self.i2 = nn.Linear(256, 256)
+		self.i3 = nn.Linear(256, num_actions)		
 
 
 	def forward(self, state):
-		q = F.relu(self.l1(state))
-		q = F.relu(self.l2(q))
-		return self.l3(q)
+		q = F.relu(self.q1(state))
+		q = F.relu(self.q2(q))
+
+		i = F.relu(self.i1(state))
+		i = F.relu(self.i2(i))
+		i = F.relu(self.i3(i))
+		return self.q3(q), F.log_softmax(i, dim=1), i
 
 
-class DQN(object):
+class REM(object):
 	def __init__(
 		self, 
 		is_atari,
@@ -61,7 +112,7 @@ class DQN(object):
 		self.device = device
 
 		# Determine network type
-		self.Q = Conv_Q(state_dim[0], num_actions).to(self.device) if is_atari else FC_Q(state_dim, num_actions).to(self.device)
+		self.Q = Conv_Q(state_dim[0], num_actions, device).to(self.device) if is_atari else FC_Q(state_dim, num_actions).to(self.device)
 		self.Q_target = copy.deepcopy(self.Q)
 		self.Q_optimizer = getattr(torch.optim, optimizer)(self.Q.parameters(), **optimizer_parameters)
 
@@ -95,7 +146,7 @@ class DQN(object):
 		if np.random.uniform(0,1) > eps:
 			with torch.no_grad():
 				state = torch.FloatTensor(state).reshape(self.state_shape).to(self.device)
-				return int(self.Q(state).argmax(1))
+				return int(self.Q.compute_Q(state).argmax(1))
 		else:
 			return np.random.randint(self.num_actions)
 
@@ -133,14 +184,3 @@ class DQN(object):
 	def copy_target_update(self):
 		if self.iterations % self.target_update_frequency == 0:
 			 self.Q_target.load_state_dict(self.Q.state_dict())
-
-
-	def save(self, filename):
-		torch.save(self.Q.state_dict(), filename + "_Q")
-		torch.save(self.Q_optimizer.state_dict(), filename + "_optimizer")
-
-
-	def load(self, filename):
-		self.Q.load_state_dict(torch.load(filename + "_Q"))
-		self.Q_target = copy.deepcopy(self.Q)
-		self.Q_optimizer.load_state_dict(torch.load(filename + "_optimizer"))

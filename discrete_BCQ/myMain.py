@@ -11,8 +11,8 @@ import discrete_BCQREM
 import discrete_BCQREM_one_imt_noise
 import discrete_BCQREM_multi_imt_noise
 import discrete_BCQREM_no_batch_alpha
-import discrete_BCQREM_softmax
-import discrete_BCQREM_one_condition_noise
+# import discrete_BCQREM_softmax
+# import discrete_BCQREM_one_condition_noise
 import BCQREM_reward_var
 import BCQREM_cond_var
 
@@ -22,6 +22,10 @@ import BCQREM_adw
 import BCQREM_one_adw
 import BCQ_adw
 import BCQ_multi_imt_adw
+
+import sl_model
+import sl_multi
+import rem
 
 import discrete_BCQ
 import DQN
@@ -233,44 +237,6 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"]
 		)
-	elif args.model == 'BCQREMsoftmax':
-		print('creating BCQ-REM (softmax alpha)')
-		policy = discrete_BCQREM_softmax.discrete_BCQ(
-			is_atari,
-			num_actions,
-			state_dim,
-			device,
-			args.BCQ_threshold,
-			parameters["discount"],
-			parameters["optimizer"],
-			parameters["optimizer_parameters"],
-			parameters["polyak_target_update"],
-			parameters["target_update_freq"],
-			parameters["tau"],
-			parameters["initial_eps"],
-			parameters["end_eps"],
-			parameters["eps_decay_period"],
-			parameters["eval_eps"]
-		)
-	elif args.model == 'BCQREMcon':
-		print('creating BCQ-REM with one supervised head (only condition noise)')
-		policy = discrete_BCQREM_one_condition_noise.discrete_BCQ(
-			is_atari,
-			num_actions,
-			state_dim,
-			device,
-			args.BCQ_threshold,
-			parameters["discount"],
-			parameters["optimizer"],
-			parameters["optimizer_parameters"],
-			parameters["polyak_target_update"],
-			parameters["target_update_freq"],
-			parameters["tau"],
-			parameters["initial_eps"],
-			parameters["end_eps"],
-			parameters["eps_decay_period"],
-			parameters["eval_eps"]
-		)
 	elif args.model == 'BCQREMrvar':
 		print('creating BCQ-REM with multi supervised head (without noise), reward - std')
 		policy = BCQREM_reward_var.discrete_BCQ(
@@ -423,6 +389,64 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"],
 		)
+	elif args.model == 'sl':
+			print('creating supervised Learning model with one head')
+			policy = sl_model.Model(
+				is_atari,
+				num_actions,
+				state_dim,
+				device,
+				parameters["optimizer"],
+				parameters["optimizer_parameters"],
+			)
+	elif args.model == 'slmulti':
+			print('creating supervised Learning model with multi head')
+			policy = sl_multi.Model(
+				is_atari,
+				num_actions,
+				state_dim,
+				device,
+				parameters["optimizer"],
+				parameters["optimizer_parameters"],
+			)
+	elif args.model == 'rem':
+			print('creating REM')
+			policy = rem.REM(
+				is_atari,
+				num_actions,
+				state_dim,
+				device,
+				parameters["discount"],
+				parameters["optimizer"],
+				parameters["optimizer_parameters"],
+				parameters["polyak_target_update"],
+				parameters["target_update_freq"],
+				parameters["tau"],
+				parameters["initial_eps"],
+				parameters["end_eps"],
+				parameters["eps_decay_period"],
+				parameters["eval_eps"],
+			)
+	elif args.model == 'dqn':
+		print('creating DQN')
+		policy = DQN.DQN(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
+
+
 
 	# Load replay buffer	
 	replay_buffer.load(f"./buffers/{buffer_name}")
@@ -452,10 +476,6 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMmultiimt_{setting}", evaluations)
 		elif args.model == 'BCQREMnobatch':
 			np.save(f"./results/BCQREMnobatch_{setting}", evaluations)
-		elif args.model == 'BCQREMsoftmax':
-			np.save(f"./results/BCQREMsoftmax_{setting}", evaluations)
-		elif args.model == 'BCQREMcon':
-			np.save(f"./results/BCQREMcon_{setting}", evaluations)
 		elif args.model == 'BCQREMrvar':
 			np.save(f"./results/BCQREMrvar_{setting}", evaluations)
 		elif args.model == 'BCQREMcondvar':
@@ -472,6 +492,15 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQadw_{setting}", evaluations)
 		elif args.model == 'BCQmultiimtadw':
 			np.save(f"./results/BCQmultiimtadw_{setting}", evaluations)
+		elif args.model == 'sl':
+			np.save(f"./results/sl_{setting}", evaluations)
+		elif args.model == 'slmulti':
+			np.save(f"./results/slmulti_{setting}", evaluations)
+		elif args.model == 'rem':
+			np.save(f"./results/rem_{setting}", evaluations)
+		elif args.model == 'dqn':
+			np.save(f"./results/dqn_{setting}", evaluations)
+
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -583,6 +612,10 @@ if __name__ == "__main__":
 		BCQREMadwone
 		BCQadw
 		BCQmultiimtadw
+		sl
+		slmulti (supervised learning model with multi head)
+		rem
+		dqn
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
