@@ -23,6 +23,9 @@ import BCQREM_one_adw
 import BCQ_adw
 import BCQ_multi_imt_adw
 
+import BCQREM_adw_var_term1
+import BCQREM_adw_var_term2
+
 import sl_model
 import sl_multi
 import rem
@@ -445,6 +448,46 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eps_decay_period"],
 			parameters["eval_eps"],
 		)
+	elif args.model == 'BCQREMadwvart1':
+		print('creating BCQREM with multi SL head, adw, and action_var regularization(in target).')
+		policy = BCQREM_adw_var_term1.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+			lambda_var=args.lambda_var,
+		)
+	elif args.model == 'BCQREMadwvart2':
+		print('creating BCQREM with multi SL head, adw, and action_var regularization(in final loss).')
+		policy = BCQREM_adw_var_term2.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+			lambda_var=args.lambda_var,
+		)
 
 
 
@@ -500,6 +543,10 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/rem_{setting}", evaluations)
 		elif args.model == 'dqn':
 			np.save(f"./results/dqn_{setting}", evaluations)
+		elif args.model == 'BCQREMadwvart1':
+			np.save(f"./results/BCQREMadwvart1_{args.lambda_var}_{setting}", evaluations)
+		elif args.model == 'BCQREMadwvart2':
+			np.save(f"./results/BCQREMadwvart2_{args.lambda_var}_{setting}", evaluations)
 
 
 		training_iters += int(parameters["eval_freq"])
@@ -616,10 +663,11 @@ if __name__ == "__main__":
 		slmulti (supervised learning model with multi head)
 		rem
 		dqn
+		BCQREMadwvart1 or BCQREMadwvart2
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
-	parser.add_argument("--var_threshold", default=0.3, type=float)#  Threshold for action var
+	parser.add_argument("--lambda_var", default=1.0, type=float)	# lambda_var * action_var
 	args = parser.parse_args()
 	
 	print("---------------------------------------")	
