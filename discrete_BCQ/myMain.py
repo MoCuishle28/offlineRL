@@ -511,6 +511,11 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			lambda_var=args.lambda_var,
 		)
 
+	if args.load == 'y':
+		policy.load(f"./models/offlineRL_{setting}")
+		policy.copy_target_update()
+		print("loading model: ", f"./models/offlineRL_{setting}")
+
 	# Load replay buffer	
 	replay_buffer.load(f"./buffers/{buffer_name}")
 	
@@ -519,8 +524,10 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 	done = True 
 	training_iters = 0
 
-	print('NO.1 evaluations...')
-	evaluations.append(eval_policy(policy, args.env, args.seed))	# TODO DEBUG
+	if args.load == 'n':
+		print('NO.1 evaluations...')
+		evaluations.append(eval_policy(policy, args.env, args.seed))	# TODO DEBUG
+
 	while training_iters < args.max_timesteps: 
 		
 		for train_policy_times in range(int(parameters["eval_freq"])):
@@ -529,6 +536,8 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 				print(f'times:{train_policy_times}/[{int(parameters["eval_freq"])}], Mean Loss: {round(mean_loss, 5)}')
 
 		evaluations.append(eval_policy(policy, args.env, args.seed))
+		policy.save(f"./models/offlineRL_{setting}")	# saving model
+
 		if args.model == 'BCQ':
 			np.save(f"./results/BCQ_{setting}", evaluations)	# TODO
 		elif args.model == 'BCQREM':
@@ -691,6 +700,8 @@ if __name__ == "__main__":
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
 	parser.add_argument("--lambda_var", default=1.0, type=float)	# lambda_var * action_var
+
+	parser.add_argument("--load", default='n')
 	args = parser.parse_args()
 	
 	print("---------------------------------------")	
