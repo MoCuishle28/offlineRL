@@ -208,6 +208,7 @@ class discrete_BCQ(object):
 		self.iterations = 0
 
 		self.lambda_var = lambda_var
+		self.EPS = 1e-4
 
 
 	def select_action(self, state, eval=False):
@@ -256,18 +257,22 @@ class discrete_BCQ(object):
 			# the target of value function
 			target_value = reward + done * self.discount * target_state_value
 
-			# next action var/std
+
+			next_std_matrix = (next_std_matrix / next_std_matrix.max(1, keepdim=True)[0]).float()
 			next_action_std = next_std_matrix.gather(1, next_action)
+			var_weight = 1 / (next_action_std + self.EPS)
 
 		# Compute Q loss
-		# q_loss = F.smooth_l1_loss(current_Q, target_Q)
-		q_loss = (next_action_std * F.smooth_l1_loss(current_Q, target_Q, reduction='none')).mean()
+		q_loss = F.smooth_l1_loss(current_Q, target_Q)
+		# q_loss = (var_weight * F.smooth_l1_loss(current_Q, target_Q, reduction='none')).mean()
 
 		i_loss = F.nll_loss(train_imt, action.reshape(-1), reduction='none')
 		v_loss = F.smooth_l1_loss(current_value, target_value)
 
 		# advantage weight
 		i_loss = (i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
+		# var weight and advantage weight
+		i_loss = (var_weight * i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
 
 		# i is logits
 		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss
