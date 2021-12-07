@@ -237,6 +237,9 @@ class discrete_BCQ(object):
 		current_Q, train_imt, train_i, std_matrix, current_value = self.Q(state, need_std=True)
 		current_Q = current_Q.gather(1, action)
 
+		# action(replaybuffer) std 
+		action_std = std_matrix.gather(1, action)	# 试试带梯度的 TODO
+
 		# Compute the target Q value
 		with torch.no_grad():
 			# use average Q-values during no_grad
@@ -244,8 +247,9 @@ class discrete_BCQ(object):
 			imt = imt.exp()
 			imt = (imt/imt.max(1, keepdim=True)[0] > self.threshold).float()
 			
-			# action(replaybuffer) std
-			action_std = std_matrix.gather(1, action)
+			# TODO
+			# # action(replaybuffer) std
+			# action_std = std_matrix.gather(1, action)
 
 			# Use large negative number to mask actions from argmax
 			# next actions are selected by main Q
@@ -269,7 +273,9 @@ class discrete_BCQ(object):
 
 		# i is logits
 		# Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss
-		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss + (self.lambda_var * action_std.mean())
+		# 应该是减去 lambda_var * action_std ? 让方差越大越好? 还是加上，让方差越小越好? TODO
+		# Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss + (self.lambda_var * action_std.mean())
+		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss - (self.lambda_var * action_std.mean())
 
 		# Optimize the Q
 		self.Q_optimizer.zero_grad()

@@ -3,6 +3,7 @@ import copy
 import importlib
 import json
 import os
+import time
 
 import numpy as np
 import torch
@@ -28,9 +29,15 @@ import BCQREM_adw_var_term2
 
 import BCQREM_adw_var_weight
 
+import BCQREM_adw_A_weight
+
+import BCQ_multi_imt_adw_cond_var
+import BCQ_2Q_multi_imt_adw_cond_var
+
 import sl_model
 import sl_multi
 import rem
+import edq
 
 import discrete_BCQ
 import DQN
@@ -491,7 +498,7 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			lambda_var=args.lambda_var,
 		)
 	elif args.model == 'BCQREMadwvarw':
-		print('creating BCQREM with multi SL head, adw, and action_var weighting loss.')
+		print('creating BCQREM with multi SL head, adw, and action_var weighting SL loss.')
 		policy = BCQREM_adw_var_weight.discrete_BCQ(
 			is_atari,
 			num_actions,
@@ -510,16 +517,93 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			parameters["eval_eps"],
 			lambda_var=args.lambda_var,
 		)
+	elif args.model == 'BCQREMadwAw':
+		print('creating BCQREM with multi SL head, adw, and A weighting SL loss.')
+		policy = BCQREM_adw_A_weight.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+			lambda_var=args.lambda_var,
+		)
+	elif args.model == 'BCQmultiimtadwcondvar':
+		print('creating BCQ with multi SL head, adw, and condition -> probability / var.')
+		policy = BCQ_multi_imt_adw_cond_var.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
+	elif args.model == 'edq':
+		print('creating Emsemble Diversity Q-learning.')
+		policy = edq.EDQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
+	elif args.model == 'BCQ2Qmultiimtadwcondvar':
+		print('creating BCQ with multi 2 Q head(choose min), SL head, adw, and condition -> probability / var.')
+		policy = BCQ_2Q_multi_imt_adw_cond_var.discrete_BCQ(
+			is_atari,
+			num_actions,
+			state_dim,
+			device,
+			args.BCQ_threshold,
+			parameters["discount"],
+			parameters["optimizer"],
+			parameters["optimizer_parameters"],
+			parameters["polyak_target_update"],
+			parameters["target_update_freq"],
+			parameters["tau"],
+			parameters["initial_eps"],
+			parameters["end_eps"],
+			parameters["eps_decay_period"],
+			parameters["eval_eps"],
+		)
 
+	evaluations = []
 	if args.load == 'y':
 		policy.load(f"./models/offlineRL_{setting}")
 		policy.copy_target_update()
+		# TODO load result!
 		print("loading model: ", f"./models/offlineRL_{setting}")
 
 	# Load replay buffer	
 	replay_buffer.load(f"./buffers/{buffer_name}")
-	
-	evaluations = []
+
 	episode_num = 0
 	done = True 
 	training_iters = 0
@@ -536,7 +620,7 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 				print(f'times:{train_policy_times}/[{int(parameters["eval_freq"])}], Mean Loss: {round(mean_loss, 5)}')
 
 		evaluations.append(eval_policy(policy, args.env, args.seed))
-		policy.save(f"./models/offlineRL_{setting}")	# saving model
+		# policy.save(f"./models/offlineRL_{setting}")	# saving model
 
 		if args.model == 'BCQ':
 			np.save(f"./results/BCQ_{setting}", evaluations)	# TODO
@@ -578,7 +662,14 @@ def train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, a
 			np.save(f"./results/BCQREMadwvart2_{args.lambda_var}_{setting}", evaluations)
 		elif args.model == 'BCQREMadwvarw':
 			np.save(f"./results/BCQREMadwvarw_{setting}", evaluations)
-
+		elif args.model == 'BCQREMadwAw':
+			np.save(f"./results/BCQREMadwAw_{setting}", evaluations)
+		elif args.model == 'BCQmultiimtadwcondvar':
+			np.save(f"./results/BCQmultiimtadwcondvar_{setting}", evaluations)
+		elif args.model == 'edq':
+			np.save(f"./results/edq_{setting}", evaluations)
+		elif args.model == 'BCQ2Qmultiimtadwcondvar':
+			np.save(f"./results/BCQ2Qmultiimtadwcondvar_{setting}", evaluations)
 
 		training_iters += int(parameters["eval_freq"])
 		print(f"Training iterations: {training_iters}/[{int(args.max_timesteps)}]")
@@ -695,7 +786,11 @@ if __name__ == "__main__":
 		rem
 		dqn
 		BCQREMadwvart1 or BCQREMadwvart2
-		BCQREMadwvarw -> var weighting loss
+		BCQREMadwvarw -> var weighting SL loss
+		BCQREMadwAw -> A weight SL loss
+		BCQmultiimtadwcondvar -> probability / var
+		edq -> Emsemble Diversity Q-learning
+		BCQ2Qmultiimtadwcondvar -> probability / var & 2 Q head(choose min)
 	'''
 	parser.add_argument("--model", default='BCQ')
 	parser.add_argument('--polyak', default='n')	# y / n -> polyak_target_update / NO polyak_target_update
@@ -704,7 +799,8 @@ if __name__ == "__main__":
 	parser.add_argument("--load", default='n')
 	args = parser.parse_args()
 	
-	print("---------------------------------------")	
+	start_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+	print(f"-------------------- Start Date: {start_date} --------------------")
 	if args.train_behavioral:
 		print(f"Setting: Training behavioral, Env: {args.env}, Seed: {args.seed}")
 	elif args.generate_buffer:
@@ -731,6 +827,8 @@ if __name__ == "__main__":
 	parameters = atari_parameters if is_atari else regular_parameters
 	parameters['polyak_target_update'] = True if args.polyak == 'y' else False
 	print(parameters)
+	print('--------------- args ----------------')
+	print(args)
 
 	env.seed(args.seed)
 	torch.manual_seed(args.seed)
@@ -745,3 +843,6 @@ if __name__ == "__main__":
 		interact_with_environment(env, replay_buffer, is_atari, num_actions, state_dim, device, args, parameters)
 	else:
 		train_BCQREM(env, replay_buffer, is_atari, num_actions, state_dim, device, args, parameters)
+
+	end_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+	print(f"-------------------- END Date: {end_date} --------------------")

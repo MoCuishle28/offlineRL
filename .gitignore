@@ -1,1 +1,4 @@
 *.npy
+*.pyc
+*.pth
+/discrete_BCQ/models/*

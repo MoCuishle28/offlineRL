@@ -20,14 +20,6 @@ class Conv_Q(nn.Module):
 		self.q1 = nn.Linear(3136, 512)
 		# head 1
 		self.q2_1 = nn.Linear(512, num_actions)
-		# head 2
-		self.q2_2 = nn.Linear(512, num_actions)
-		# head 3
-		self.q2_3 = nn.Linear(512, num_actions)
-		# head 4
-		self.q2_4 = nn.Linear(512, num_actions)
-		# head 5
-		self.q2_5 = nn.Linear(512, num_actions)
 
 		# value function
 		self.v2_1 = nn.Linear(512, 256)
@@ -52,8 +44,7 @@ class Conv_Q(nn.Module):
 		c = F.relu(self.c2(c))
 		c = F.relu(self.c3(c))
 
-		# Q-function
-		q = F.relu(self.q1(c.reshape(-1, 3136)))		
+		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
 		# v = F.relu(self.v2_2(v))	# original
@@ -64,15 +55,7 @@ class Conv_Q(nn.Module):
 		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
 		i = (i_1 + i_2 + i_3 + i_4 + i_5) / 5.0
 
-		# compute ensemble Q-values (batch, action dim)
-		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
-		q2 = (q2_1 + q2_2 + q2_3 + q2_4 + q2_5) / 5.0
-		
-		# compute action std (batch, action dim)
-		# 1. probability std
-		# std_matrix = self._compute_action_std(F.softmax(i_1, dim=1), F.softmax(i_2, dim=1), 
-		# 	F.softmax(i_3, dim=1), F.softmax(i_4, dim=1), F.softmax(i_5, dim=1)) if need_std==True else None
-		# 2. logits std
+		q2 = self.q2_1(q)
 		std_matrix = self._compute_action_std(i_1, i_2, i_3, i_4, i_5) if need_std==True else None
 		return q2, F.log_softmax(i, dim=1), i, std_matrix, v
 
@@ -98,7 +81,6 @@ class Conv_Q(nn.Module):
 		c = F.relu(self.c2(c))
 		c = F.relu(self.c3(c))
 
-		# Q-function
 		q = F.relu(self.q1(c.reshape(-1, 3136)))
 		# value function
 		v = F.relu(self.v2_1(q))	# share param with Q-function
@@ -110,8 +92,8 @@ class Conv_Q(nn.Module):
 
 		# compute ensemble logits (batch, action dim)
 		i_1, i_2, i_3, i_4, i_5 = self.i2_1(i), self.i2_2(i), self.i2_3(i), self.i2_4(i), self.i2_5(i)
-		# compute ensemble Q-values (batch, action dim)
-		q2_1, q2_2, q2_3, q2_4, q2_5 = self.q2_1(q), self.q2_2(q), self.q2_3(q), self.q2_4(q), self.q2_5(q)
+		# compute Q-values (batch, action dim)
+		q2 = self.q2_1(q)
 		
 		# random ensemble mixture
 		alpha = torch.Tensor(batch, 5).uniform_(0, 1).to(self.device)
@@ -121,16 +103,7 @@ class Conv_Q(nn.Module):
 
 		# random ensemble logits
 		i = alpha[:, 0].view(-1, 1)*i_1 + alpha[:, 1].view(-1, 1)*i_2 + alpha[:, 2].view(-1, 1)*i_3 + alpha[:, 3].view(-1, 1)*i_4 + alpha[:, 4].view(-1, 1)*i_5
-		# random ensemble q
-		q2 = alpha[:, 0].view(-1, 1)*q2_1 + alpha[:, 1].view(-1, 1)*q2_2 + alpha[:, 2].view(-1, 1)*q2_3 + alpha[:, 3].view(-1, 1)*q2_4 + alpha[:, 4].view(-1, 1)*q2_5
-
-		# compute action std (batch, action dim)
-		# # 1. probability std
-		# std_matrix = self._compute_action_std(F.softmax(i_1, dim=1), F.softmax(i_2, dim=1), 
-		# 	F.softmax(i_3, dim=1), F.softmax(i_4, dim=1), F.softmax(i_5, dim=1))
-		# 2. logits std
-		std_matrix = self._compute_action_std(i_1, i_2, i_3, i_4, i_5) if need_std==True else None
-		return q2, F.log_softmax(i, dim=1), i, std_matrix, v
+		return q2, F.log_softmax(i, dim=1), i, v
 
 
 # Used for Box2D / Toy problems
@@ -174,7 +147,7 @@ class discrete_BCQ(object):
 		end_eps = 0.001,
 		eps_decay_period = 25e4,
 		eval_eps=0.001,
-		lambda_var = 1.0,
+		std_threshold=0.6	# tune TODO
 	):
 	
 		self.device = device
@@ -203,12 +176,10 @@ class discrete_BCQ(object):
 
 		# Threshold for "unlikely" actions
 		self.threshold = BCQ_threshold
+		self.std_threshold = std_threshold
 
 		# Number of training iterations
 		self.iterations = 0
-
-		self.lambda_var = lambda_var
-		self.EPS = 1e-4
 
 
 	def select_action(self, state, eval=False):
@@ -217,8 +188,8 @@ class discrete_BCQ(object):
 		if np.random.uniform(0,1) > self.eval_eps:
 			with torch.no_grad():
 				state = torch.FloatTensor(state).reshape(self.state_shape).to(self.device)
-				q, imt, i, std_matrix, _ = self.Q.compute_Q(state, need_std=False)	# use average Q-values during the test
-				imt = imt.exp()
+				q, imt, i, std_matrix,  _ = self.Q.compute_Q(state, need_std=True)	# use average Q-values during the test
+				imt = imt.exp() / std_matrix
 				imt = (imt/imt.max(1, keepdim=True)[0] > self.threshold).float()
 				# imt is a matrix (batch, action dim) with 0 or 1 values
 				# Use large negative number to mask actions from argmax
@@ -235,47 +206,38 @@ class discrete_BCQ(object):
 
 		# Get current Q estimate
 		# use random ensemble Q-values during optimization
-		current_Q, train_imt, train_i, _, current_value = self.Q(state, need_std=True)
+		current_Q, train_imt, train_i, current_value = self.Q(state, need_std=False)
 		current_Q = current_Q.gather(1, action)
 
 		# Compute the target Q value
 		with torch.no_grad():
 			# use average Q-values during no_grad
-			q, imt, i, _, _ = self.Q.compute_Q(next_state, need_std=False)
-			imt = imt.exp()
+			q, imt, i, std_matrix, _ = self.Q.compute_Q(next_state, need_std=True)
+
+			imt = imt.exp() / std_matrix
 			imt = (imt/imt.max(1, keepdim=True)[0] > self.threshold).float()
 
 			# Use large negative number to mask actions from argmax
-			# next actions are selected by main Q
+			# next actions are selected by main Q  (same value pick last)
 			next_action = (imt * q + (1 - imt) * -1e8).argmax(1, keepdim=True)
 
 			# target network use average Q-values
-			q, imt, i, next_std_matrix, target_state_value = self.Q_target.compute_Q(next_state, need_std=True)
-
+			q, imt, i, _, target_state_value = self.Q_target.compute_Q(next_state, need_std=False)
 			target_Q = reward + done * self.discount * q.gather(1, next_action).reshape(-1, 1)
-			
+
 			# the target of value function
 			target_value = reward + done * self.discount * target_state_value
 
-			next_std_matrix = (next_std_matrix / next_std_matrix.max(1, keepdim=True)[0]).float()
-			next_action_std = next_std_matrix.gather(1, next_action)
-			var_weight = 1 / (next_action_std + self.EPS)
-
 		# Compute Q loss
 		q_loss = F.smooth_l1_loss(current_Q, target_Q)
-		# q_loss = (var_weight * F.smooth_l1_loss(current_Q, target_Q, reduction='none')).mean()
-
 		i_loss = F.nll_loss(train_imt, action.reshape(-1), reduction='none')
 		v_loss = F.smooth_l1_loss(current_value, target_value)
 
 		# advantage weight
-		# i_loss = (i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
-		# var weight and advantage weight
-		i_loss = (var_weight * i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
+		i_loss = (i_loss * torch.exp(current_Q.reshape(-1) - current_value.reshape(-1))).mean()
 
 		# i is logits
 		Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss
-		# Q_loss = q_loss + i_loss + 1e-2 * train_i.pow(2).mean() + v_loss + (self.lambda_var * action_std.mean())
 
 		# Optimize the Q
 		self.Q_optimizer.zero_grad()
@@ -296,13 +258,3 @@ class discrete_BCQ(object):
 	def copy_target_update(self):
 		if self.iterations % self.target_update_frequency == 0:
 			 self.Q_target.load_state_dict(self.Q.state_dict())
-
-	def save(self, filename):
-		torch.save(self.Q.state_dict(), filename + "_BCQREMadw_var_weight")
-		torch.save(self.Q_optimizer.state_dict(), filename + "_BCQREMadw_var_weight" + "_optimizer")
-
-
-	def load(self, filename):
-		self.Q.load_state_dict(torch.load(filename + "_BCQREMadw_var_weight"))
-		self.Q_target = copy.deepcopy(self.Q)
-		self.Q_optimizer.load_state_dict(torch.load(filename + "_BCQREMadw_var_weight" + "_optimizer"))
